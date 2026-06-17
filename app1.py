@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 import openpyxl
 import json
 import os
@@ -13,8 +13,6 @@ st.write("Upload an Annual Report PDF, and the AI will automatically extract and
 
 # --- API KEY CONFIGURATION ---
 api_key = st.text_input("Enter your Google Gemini API Key:", type="password")
-if api_key:
-    genai.configure(api_key=api_key)
 
 # --- UPLOADS ---
 uploaded_pdf = st.file_uploader("1. Drop the Annual Report PDF here", type="pdf")
@@ -34,14 +32,16 @@ if st.button("Process Data & Generate Excel"):
     else:
         with st.spinner("AI is reading the financial statements. This takes about 15-30 seconds..."):
             try:
+                # Initialize the new GenAI client
+                client = genai.Client(api_key=api_key)
+
                 # 1. Save PDF temporarily so Gemini can read it
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
                     temp_pdf.write(uploaded_pdf.read())
                     temp_pdf_path = temp_pdf.name
 
-                # 2. Upload to Gemini
-                sample_file = genai.upload_file(path=temp_pdf_path, display_name="Annual Report")
-                model = genai.GenerativeModel('gemini-2.5-flash')
+                # 2. Upload to Gemini using the new library format
+                sample_file = client.files.upload(file=temp_pdf_path, config={'display_name': 'Annual Report'})
                 
                 # 3. Prompt the AI
                 prompt = f"""
@@ -69,9 +69,13 @@ if st.button("Process Data & Generate Excel"):
                 }}
                 """
                 
-                response = model.generate_content([sample_file, prompt])
+                # Generate content using the new models endpoint
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[sample_file, prompt]
+                )
                 
-                # 4. Clean JSON (Fixed the single-line syntax)
+                # 4. Clean JSON
                 json_str = response.text.strip().replace('```json', '').replace('```', '')
                 parsed_data = json.loads(json_str)
                 
@@ -110,9 +114,9 @@ if st.button("Process Data & Generate Excel"):
                 wb.save(output)
                 output.seek(0)
                 
-                # Cleanup temp file
+                # Cleanup temp file and Gemini file
                 os.remove(temp_pdf_path)
-                genai.delete_file(sample_file.name)
+                client.files.delete(name=sample_file.name)
 
                 st.success("✅ Success! The data has been successfully mapped.")
                 st.download_button(
